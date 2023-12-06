@@ -1,4 +1,10 @@
 #include "systemcalls.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,7 +22,9 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-
+    int rc = system(cmd);
+    if (rc == -1)
+	    return false;
     return true;
 }
 
@@ -58,7 +66,26 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
-
+    int pid = fork();
+    if (pid == -1) {
+        printf("fork failed. errno=%d\n", errno);
+	return false;
+    } else if (pid == 0)  { 
+        // child process
+        int rc = execv(command[0], command);
+	if (rc != 0) {
+	    printf("execv failed. errno=%d\n", errno);
+	    exit(1);
+	}
+    } else {
+        int stat;
+        wait(&stat);
+	printf("WEXITSTATUS(stat)=%d\n", WEXITSTATUS(stat));
+	if (WEXITSTATUS(stat) == 1) {
+	   printf("child failed\n");
+	   return false;
+	}
+    }
     va_end(args);
 
     return true;
@@ -92,7 +119,38 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0) { 
+	    perror("open"); 
+	    return false; 
+    }
+    int pid = fork();
+    if (pid == -1) {
+        perror("fork failed"); 
+	return false;
+    } else if (pid == 0) {
+        // child process
+        if (dup2(fd, 1) < 0) { 
+            perror("dup2 failed"); 
+            return false; 
+        }
+        close(fd);
+        if (execvp(command[0], command) != 0) { 
+            perror("execvp failed"); 
+	    exit(1);
+        }
+    } else {
+        int stat;
+        wait(&stat);
+        if (WEXITSTATUS(stat) == 1) {
+           printf("child failed\n");
+	   close(fd);
+           return false;
+        }
 
+	close(fd);
+
+    }
     va_end(args);
 
     return true;
