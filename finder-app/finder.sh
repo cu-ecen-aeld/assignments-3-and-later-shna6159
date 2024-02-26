@@ -1,15 +1,31 @@
-#! /bin/sh
+#!/bin/sh
+#first scipt!
 
-if [ $# != 2 ]; then
-	echo "parameters: [filsdir] [searchstr]"
-	exit 1
-fi
-if [ ! -d $1 ]; then 
-	echo "directory $1 doesn't exist"
-	exit 1
-fi
+
+#need to exit with return val 1 if theres no path or string specified
 filesdir=$1
-files_num=`find  ${filesdir} -type f | wc -l`
-searchstr=$2 
-matching_lines=`grep -rn ${searchstr} ${filesdir} | wc -l`
-echo "The number of files are ${files_num} and the number of matching lines are ${matching_lines}"
+searchstr=$2
+
+if [ $# != 2 ]       
+then
+	echo "parameters not specified"
+	exit 1
+fi
+
+#check and return exit value 1 if filesdir does not represent a directory
+
+
+if [ ! -d $filesdir ]
+then
+	echo "Directory '$filesdir' does not exist."
+	exit 1
+fi
+
+#print message with number of files and number of matching lines
+
+
+num_files=$( ls "$filesdir" | wc -l )           
+num_matches=$( grep -r "$searchstr" "$filesdir" | wc -l )
+
+echo The number of files are $num_files and the number of matching lines are $num_matches
+

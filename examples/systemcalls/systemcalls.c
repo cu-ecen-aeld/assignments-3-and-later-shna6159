@@ -1,10 +1,10 @@
 #include "systemcalls.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <stdlib.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -22,10 +22,17 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-    int rc = system(cmd);
-    if (rc == -1)
+    
+    if ( cmd  == 0 ) 
+	   
+    return false; 
+
+    int ret;
+    ret = system(cmd);
+    if (ret)
 	    return false;
-    return true;
+	    
+    return true; 
 }
 
 /**
@@ -55,7 +62,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+  //  command[count] = command[count];
 
 /*
  * TODO:
@@ -66,27 +73,51 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
-    int pid = fork();
-    if (pid == -1) {
-        printf("fork failed. errno=%d\n", errno);
-	return false;
-    } else if (pid == 0)  { 
-        // child process
-        int rc = execv(command[0], command);
-	if (rc != 0) {
-	    printf("execv failed. errno=%d\n", errno);
-	    exit(1);
-	}
-    } else {
-        int stat;
-        wait(&stat);
-	printf("WEXITSTATUS(stat)=%d\n", WEXITSTATUS(stat));
-	if (WEXITSTATUS(stat) == 1) {
-	   printf("child failed\n");
-	   return false;
-	}
-    }
+    
+   
     va_end(args);
+    
+    pid_t pid;
+    int status;
+
+    pid = fork();
+   
+/*   if (pid > 0) {
+	    printf("I am the parent pid = %d \n", pid);
+    } else if (!pid) {
+	    printf("I am the child\n"); 
+    } else if (pid == -1) {
+	    perror("fork"); }   */
+
+    // the child
+   
+   
+    if (pid == -1) {
+	   return false;
+	     	   }
+    else if (pid == 0) {
+	    execv(command[0], command);
+	    exit(EXIT_FAILURE);
+	   
+    }
+
+   // the parent does this
+    else {
+	   do {
+		 if ( waitpid(pid, &status, 0) == -1 )
+		 return false;
+		         
+	  //need macro WEXITSTATUS with WIFEEXITED
+
+	   if (WIFEXITED(status)) {
+		   printf("child exited with status %d \n",status);
+    }
+	   if (WEXITSTATUS(status) != 0)
+		   return false;
+    }  while (pid == 0);
+    }	   
+
+
 
     return true;
 }
@@ -109,7 +140,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+  //  command[count] = command[count];
 
 
 /*
@@ -119,39 +150,53 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
-    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
-    if (fd < 0) { 
-	    perror("open"); 
-	    return false; 
-    }
-    int pid = fork();
-    if (pid == -1) {
-        perror("fork failed"); 
-	return false;
-    } else if (pid == 0) {
-        // child process
-        if (dup2(fd, 1) < 0) { 
-            perror("dup2 failed"); 
-            return false; 
-        }
-        close(fd);
-        if (execvp(command[0], command) != 0) { 
-            perror("execvp failed"); 
-	    exit(1);
-        }
-    } else {
-        int stat;
-        wait(&stat);
-        if (WEXITSTATUS(stat) == 1) {
-           printf("child failed\n");
-	   close(fd);
-           return false;
-        }
-
-	close(fd);
-
-    }
+    
     va_end(args);
+
+    int fd = open(outputfile, O_WRONLY|O_APPEND|O_CREAT|O_TRUNC,0644);
+    if (fd < 0) {
+	    return false; }
+    
+
+    pid_t pid;
+    int status;
+
+    pid = fork();
+
+   // the child
+    if (pid == -1) {
+           return false;
+                   }
+    else if (pid == 0) {
+	    dup2(fd, 1);
+	    close(fd);
+            execv(command[0], command);
+            exit(EXIT_FAILURE);
+    }
+
+    // the parent does this
+    
+    else  {  close(fd);
+
+           do {
+                 if ( waitpid(pid, &status, 0) == -1 )
+                 return false; 
+
+          //need macro WEXITSTATUS with WIFEEXITED
+
+           if (WIFEXITED(status)) {
+                   printf("child exited with status %d \n",status);
+    }
+           if (WEXITSTATUS(status) != 0)
+                   return false;
+    }  while (pid == 0);
+    }
+
+    close(fd);
+
+
+
+
 
     return true;
 }
