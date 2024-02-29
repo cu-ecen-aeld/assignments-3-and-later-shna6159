@@ -1,31 +1,18 @@
 #!/bin/sh
-#first scipt!
 
-
-#need to exit with return val 1 if theres no path or string specified
-filesdir=$1
-searchstr=$2
-
-if [ $# != 2 ]       
-then
-	echo "parameters not specified"
+if [[ "$#" -ne 2 ]]; then
+	echo "Useage: finder.sh /path/to/search searchstr"
 	exit 1
 fi
 
-#check and return exit value 1 if filesdir does not represent a directory
+DIR="$1"
+SEARCH="$2"
 
-
-if [ ! -d $filesdir ]
-then
-	echo "Directory '$filesdir' does not exist."
+if [[ ! -d "$1" ]]; then
+	echo "$1 does not exist."
 	exit 1
 fi
 
-#print message with number of files and number of matching lines
+printf "The number of files are %d and the number of matching lines are %d"  "$(grep -Rl $2 $1 | wc -l)" "$(grep -R $2 $1 | wc -l)"
 
-
-num_files=$( ls "$filesdir" | wc -l )           
-num_matches=$( grep -r "$searchstr" "$filesdir" | wc -l )
-
-echo The number of files are $num_files and the number of matching lines are $num_matches
-
+exit 0

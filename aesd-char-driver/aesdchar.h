@@ -5,6 +5,9 @@
  *      Author: Dan Walkes
  */
 
+#include <linux/mutex.h>
+#include "aesd-circular-buffer.h"
+
 #ifndef AESD_CHAR_DRIVER_AESDCHAR_H_
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
@@ -23,17 +26,15 @@
 #  define PDEBUG(fmt, args...) /* not debugging: nothing */
 #endif
 
-#include "aesd-circular-buffer.h"
-
 struct aesd_dev
 {
-    /**
-     * TODO: Add structure(s) and locks needed to complete assignment requirements
-     */
-    struct aesd_buffer_entry buffer_entry;      // The buffer string will be dynamically allocated
-    struct aesd_circular_buffer buffer_storage;  // Storage circular buffer
-    struct mutex lock;
-    struct cdev cdev;                            // Char device structure
+    char* string;
+    size_t string_size;
+    size_t string_capacity;
+    struct mutex buffer_mutex;
+    struct aesd_circular_buffer buffer;
+    struct cdev cdev;     /* Char device structure      */
 };
+
 
 #endif /* AESD_CHAR_DRIVER_AESDCHAR_H_ */

@@ -1,17 +1,28 @@
-CC=aarch64-none-linux-gnu-gcc
-CFLAGS=-Wall -g
-OBJ=writer
+INCLUDE_DIRS = 
+LIB_DIRS = 
+CC = gcc
 
+CDEFS=
+CFLAGS= -O0 -g $(INCLUDE_DIRS) $(CDEFS)
+LIBS=
 
-# link default target to the rest of object files
+HFILES=
+CFILES= writer.c
 
-all: $(OBJ)
-	
+SRCS= ${HFILES} ${CFILES}
+OBJS= ${CFILES:.c=.o}
 
-writer: writer.c
-	$(CC) $(CFLAGS) writer.c -o $(OBJ)
-
-# rule used to clean objects and targets 
+all: writer
 
 clean:
-	rm -f *.o $(OBJ)	
+		-rm -f *.o *.d
+		-rm -f writer
+
+writer: writer.o
+	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $@.o
+
+depend:
+
+.c.o:
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $<
+
