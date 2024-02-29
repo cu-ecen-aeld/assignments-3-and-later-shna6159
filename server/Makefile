@@ -1,19 +1,27 @@
-CC?=$(CROSS_COMPILE)gcc
-CFLAGS?=-Wall -Werror -g -O0
-LDFLAGS?=-lrt -pthread
+INCLUDE_DIRS =
+LIB_DIRS =
+CC? = gcc
 
-TARGET?=aesdsocket
+CDEFS =
+CFLAGS? = -O0 -Wall -Werror -g $(INCLUDE_DIRS) $(CDEFS)
+LDFLAGS? = -lpthread
+LIBS =
 
-.PHONY: all clean
+HFILES =
+CFILES = aesdsocket.c
 
+SRCS = ${HFILES} ${CFILES}
+OBJS = ${CFILES:.c=.o}
 
-all: $(TARGET)
-
-
-$(TARGET): $(TARGET).c
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+all: aesdsocket
+default: aesdsocket
 
 clean:
-	rm -f $(TARGET).o
-	rm -f $(TARGET)
+	-rm -f *.o *.d
+	-rm -f aesdsocket
 
+aesdsocket: aesdsocket.o
+	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $@.o $(LDFLAGS)
+
+.c.o:
+	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $<
