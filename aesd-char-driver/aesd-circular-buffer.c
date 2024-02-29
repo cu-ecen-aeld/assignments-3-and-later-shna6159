@@ -1,6 +1,6 @@
 /**
  * @file aesd-circular-buffer.c
- * @brief Functions and data related to a circular buffer imlementation
+ * @brief Functions and data related to a circular buffer implementation
  *
  * @author Dan Walkes
  * @date 2020-03-01
@@ -29,40 +29,28 @@
 struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn )
 {
-	// initialize variables for offsets
-	// keeps track of where we are in this continous block of data
-	size_t current_offset = 0;
-	size_t entry_size = 0;
-	// sets the entry ptr as zero intially
-	struct aesd_buffer_entry *entry = NULL;
-	
-	// checks if buffer is valid or not full
-	if (buffer == NULL) return NULL;
-	
-	// looping for entry
-	for (uint8_t i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) {
-		
-		// first location in entry to read from plus i iteration from a range of 10
-		uint8_t index = (buffer->out_offs + i) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-		
-		//entry defined above is now getting the entry from the array index that was defined in the CB struct
-		entry = &buffer->entry[index];
-		
-		//crucial bc ensures that buffer doesnt access entries where buffer isn't full yet
-		if (!buffer->full && buffer->in_offs) break;
-		
-		// size is number of bytes stored in buffptr
-		entry_size = entry->size;
-		
-		if (char_offset < (current_offset + entry_size)) {
-			
-			//this shows we found our entry point containing the offset
-			*entry_offset_byte_rtn = char_offset - current_offset;
-			return entry;
-		}
-		current_offset += entry_size;
-	}
-			
+    // If the buffer empty there is nothing to report
+    if ( (false == buffer->full) && (buffer->in_offs == buffer->out_offs) ) {
+        return NULL;
+    }
+    else {
+
+        uint8_t index = buffer->out_offs;
+
+        do {
+            if (char_offset < buffer->entry[index].size) {
+                *entry_offset_byte_rtn = char_offset;
+                return &buffer->entry[index];
+            }
+
+            char_offset -= buffer->entry[index].size;
+
+            if (++index == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+                index = 0;
+        }
+        while( index != (buffer->in_offs) );
+    }
+
     return NULL;
 }
 
@@ -72,35 +60,38 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * new start location.
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+* @return NULL or, if an existing entry at out_offs was replaced, the buffptr for the entry which was replaced (for memory free usage)
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char * aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-	//check if buffer is full
-	//if not then add the entry 
-	//overwrite old entry then increment to new start or entry
-	
-	// full variable retrieved from struct in header file
-	if (buffer->full) {
-		
-		//advances out_offs to next location and wraps around if exceeds CB
-		buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-	}
-	
-	//copy the add_entry to the current in_offs position
-	buffer->entry[buffer->in_offs] = *add_entry;
-	
-	//advance the in_offs to the next position and wrapping if needed
-	// remember that in_offs is the current location in the entry structure where the next write should
-    //be stored.
-	buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-	
-	//checking if buffer is full, keep in mind that when in_offs = out_offs means that the
-	//in_offs has wrapped around to overlap with out_offs
-	if(buffer->in_offs == buffer->out_offs) {
-		buffer->full = true;
-	}
+    const char *erased_buffptr = NULL;
+
+    // If the buffer was already declared full (the Input table index reached back to Output position), the oldest position
+    // Output will be overwritten. Requiring to increment Output index to the following position (the futur new oldest), and also
+    // to return the pointer of the overwritten string in order to free its memory.
+    if (buffer->full == true) {
+        erased_buffptr = buffer->entry[buffer->out_offs].buffptr;
+        
+	// Next Output table index to point the new oldest
+        if (++buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+            buffer->out_offs = 0;
+    }
+
+    // Add a the entry at the indicated table Input index
+    memcpy(&(buffer->entry[buffer->in_offs]), add_entry, sizeof(struct aesd_buffer_entry));
+    //buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
+    //buffer->entry[buffer->in_offs].size = add_entry->size;
+
+    // Set to the next Input table index
+    if (++buffer->in_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+        buffer->in_offs = 0;
+    
+    // If the next Input index folded back to the oldest Output position the buffer is declared full
+    if (buffer->in_offs == buffer->out_offs)
+        buffer->full = true;
+
+    return erased_buffptr;
 }
-	
 
 /**
 * Initializes the circular buffer described by @param buffer to an empty struct
