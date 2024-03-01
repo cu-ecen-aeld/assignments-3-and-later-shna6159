@@ -51,10 +51,12 @@ struct aesd_circular_buffer
     bool full;
 };
 
+extern size_t aesd_circular_buffer_size(struct aesd_circular_buffer *buffer);
+
 extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn );
 
-extern const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
+extern const char * aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 

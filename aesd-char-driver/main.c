@@ -11,328 +11,347 @@
  *
  */
 
-#include <linux/module.h>
+#include <linux/module.h>  //
 #include <linux/init.h>
+#include <linux/slab.h>    // memory allocation
 #include <linux/printk.h>
 #include <linux/types.h>
-#include <linux/fs.h> // file_operations. For MKDEV()
-#include <linux/slab.h> // for kfree()
+#include <linux/cdev.h>
+#include <linux/fs.h>      // file_operations
+
+//#include <linux/uaccess.h> // userland memory
+
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
+
+#define DEVICE_NAME "aesdchar"
+
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Spencer Manning"); /** DONE: fill in your name **/
+MODULE_AUTHOR("David Peter"); /** TODO: fill in your name **/
 MODULE_LICENSE("Dual BSD/GPL");
 
-struct aesd_dev aesd_device;
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
-    struct aesd_dev *dev;
-    PDEBUG("Opening aesdchar module");
+    struct aesd_dev *aesd_device = NULL;
 
-    // DONE: handle open
-    // "Use inode->i_cdev with container_of to locate within aesd_dev"
-    dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
-    // "Set filp->private_data with our aesd_dev device struct"
-    filp->private_data = dev;
-
-    // Check for device errors or other hardware problems if necessary
+    PDEBUG("open\n");
+    /**
+     * TODO: handle open
+     */    
+    aesd_device = container_of(inode->i_cdev, struct aesd_dev, cdev);
+    filp->private_data = aesd_device;
 
     return 0;
 }
 
 int aesd_release(struct inode *inode, struct file *filp)
 {
-    PDEBUG("Releasing aesdchar module");
-    // DONE: handle release
-    // Do nothing like scull does since filp->private_data was allocated in module_init().
-    // Will be freed in module_exit().
+    PDEBUG("release\n");
+    /**
+     * TODO: handle release
+     */
     return 0;
 }
 
-/*
- b. Return the content (or partial content) related to the most recent 10 write commands,
- in the order they were received, on any read attempt.
-    1. You should use the position specified in the read to determine the location and number of bytes to return.
-    2. You should honor the count argument by sending only up to the first “count” bytes
-    back of the available bytes remaining.
-        *** I do this indirectly because even though I only send 1 byte back per read, the calling fuction will
-        *** call aesd_read() multiple times to get the full count.
-*/
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
-                loff_t *f_pos)
+
+
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
+    struct aesd_dev *aesd_device = filp->private_data;
+    struct aesd_buffer_entry *tmp_entry = NULL;
+    size_t entry_offset_byte = 0;
     ssize_t retval = 0;
-    struct aesd_buffer_entry *entry;
-    struct aesd_dev *dev = filp->private_data;
-    size_t offset_byte_rtn = 0;
 
-    PDEBUG("Reading up to 0x%zx bytes at offset %lld", count, *f_pos);
-    // DONE: handle read
-    /*
-    Private_data member from filp can be used to get aesd_dev
-    buff is the buffer to fill
-        Need to use copy_to_user to access this buffer directly
-    count is the max number of bytes to buf. May want/need less than this.
-        The number of bytes to read back into userspace using buff
-    f_pos is the pointer to the read offset
-        References a location in your virtual device
-        A specific byte of the circular buffer (char_offset)
-        Start the read at this offset
-        Update the pointer to point to the next offset
+    PDEBUG("aesd_read %zu bytes with offset %lld (filp->f_po %lld)\n", count, *f_pos, filp->f_pos);
 
-    Return:
-    If retval == count, the requested number of bytes were transferred
-    If 0 < retval < count, only a portion has been returned (partial read). Encouraged.
-        "Read one command at a time from your driver.""
-    If 0, end of file
-    If negative, error occurred
-    */
-
-    // Need to make sure that filp and buf are defined
-    if ((!filp) || (!buf)) {
-        return -EINVAL;
-    }
-
-    if (mutex_lock_interruptible(&dev->lock)) {
-        PDEBUG("Mutex not acquired");
-        // restart because mutex interrupted and we shouldn't continue
+    /**
+     * TODO: handle read
+     */
+    if (mutex_lock_interruptible(&aesd_device->lock))
         return -ERESTARTSYS;
+
+    tmp_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&aesd_device->buffer_storage, (size_t) *f_pos, &entry_offset_byte);
+
+    if(NULL == tmp_entry) {
+        //retval = EOF;
+	PDEBUG("aesd_read EOF\n");
+	retval = 0;
+	goto out;
     }
 
-    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circ_buffer, *f_pos, &offset_byte_rtn);
-
-    if (entry) {
-        if (copy_to_user(buf, entry->buffptr+offset_byte_rtn, 1)) {
-            // something bad occurred during copy to user
-            retval = -EFAULT;
-        }
-
-        // increment the byte offset pointer value to be used the next time aesd_read() is called
-        (*f_pos)++;
-        retval = 1;
-    }
-    // else no entry found and reached end of the circular buffer
-
-    mutex_unlock(&dev->lock);
-    return retval;
-}
+    PDEBUG("aesd_read temp_entry->buffptr %s ->size %ld with a desired entry_offset of %ld \n", tmp_entry->buffptr, tmp_entry->size, entry_offset_byte);
 
 
-/*
-  a. Allocate memory for each write command as it is received,
-  supporting any length of write request (up to the length of memory which can be allocated through kmalloc),
-  and saving the write command content within allocated memory.
-    i. The write command will be terminated with a \n character as was done with the aesdsocket application.
-        1. Write operations which do not include a \n character should be saved and appended by
-        future write operations and should not be written to the circular buffer until terminated.
-    ii. The content for the most recent 10 write commands should be saved.
-    iii. Memory associated with write commands more than 10 writes ago should be freed.
-    iv. Write position and write file offsets can be ignored on this assignment,
-    each write will just write to the most recent entry in the history buffer or append to any unterminated command.
-    v. For the purpose of this assignment you can use kmalloc for all allocations
-    regardless of size, and assume writes will be small enough to work with kmalloc.
-*/
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
-                loff_t *f_pos)
-{
-    ssize_t retval = -EAGAIN;
-    const char *lost_entry = NULL;
-    struct aesd_dev *dev = filp->private_data;
-    // The data to write needs to be dynamically allocated to work with copy_from_user()
-    // FIXME: Using count+1 to account for the newline character. IS THIS NECESSARY??
-    char *temp_write_data = kmalloc(count+1, GFP_KERNEL);
-    // char *temp_write_data = kmalloc(count, GFP_KERNEL);
-    struct aesd_buffer_entry new_entry;
-
-    // Have to put this after kmalloc to satisfy the compiler.
-    // This is to account for the null terminator.
-    // The code works without this, but this just helps to make sure the null terminator is included in the input buffer.
-    // count += 1;
-
-    PDEBUG("----------------->");
-    PDEBUG("Writing %zu bytes at offset of %lld", count, *f_pos);
-    PDEBUG("buf: %s", buf);
-    PDEBUG("dev->incomplete_write_buffer: %s", dev->incomplete_write_buffer);
-    PDEBUG("dev->incomplete_write_buffer_size: %zu", dev->incomplete_write_buffer_size);
-    PDEBUG("-----------------.");
-
-    // DONE: handle write
-    /*
-    fpos - will either append to the command being written when no newline received or
-        write to the command buffer when newline received.
-
-    Return:
-    If retval == count, success number of bytes written
-    If less than count, only part written (may be written into incomplete_write_buffer only). May retry.
-    If 0, nothing written, may retry.
-    If neg, error occurred.
-    */
-
-    if ((!filp) || (!buf)) {
-     return -EINVAL;
+    // if the provided __user buf size count is bigger than the buffered string length we limit the read count at our storage string length
+    if (count > ( tmp_entry->size - entry_offset_byte )) {
+        count = ( tmp_entry->size - entry_offset_byte );
+        PDEBUG("aesd_read count clipped to %ld\n", count);
     }
 
-    if (!temp_write_data) {
-        PDEBUG("Write data not kmalloc'd");
-        retval = -ENOMEM; // signifies that memory was not malloc'd
-        return retval;
-    }
-
-    if (copy_from_user(temp_write_data, buf, count)) {
-        kfree(temp_write_data);
-        PDEBUG("Copy from user didn't work");
+    PDEBUG("aesd_read string to send to user %s\n", tmp_entry->buffptr + entry_offset_byte);
+    if (copy_to_user(buf, tmp_entry->buffptr + entry_offset_byte, count)) {
         retval = -EFAULT;
-        return retval;
+        goto out;
     }
 
-    if (mutex_lock_interruptible(&dev->lock) != 0) {
-        PDEBUG("Couldn't lock mutex");
-        return -ERESTARTSYS;
-    }
-
-    // Write all dev->incomplete_write_buffer_size + count bytes to circular buffer if a \n was found.
-    if (temp_write_data != NULL && memchr(temp_write_data, '\n', count)) {
-        PDEBUG("Found a newline in the write data");
-
-        // If haven't yet started to fill in the write buffer
-        if (dev->incomplete_write_buffer == NULL) {
-            PDEBUG("Started a new_entry");
-            new_entry.buffptr = temp_write_data;
-            new_entry.size = count;
-        }
-        else { // append the \n data to previous data
-            PDEBUG("Appending \\n data to previous data");
-            // if (temp_write_data != NULL) { // to satisfy the compiler warnings. Didn't work.
-                dev->incomplete_write_buffer = krealloc(dev->incomplete_write_buffer, dev->incomplete_write_buffer_size + count, GFP_KERNEL);
-
-                if (!dev->incomplete_write_buffer) {
-                    PDEBUG("Realloc didn't work for %s", dev->incomplete_write_buffer);
-                    kfree(dev->incomplete_write_buffer);
-                    mutex_unlock(&dev->lock);
-                    return -ENOMEM;
-                }
-
-                // copy temp_write_data to the end of the incomplete_write_buffer
-                memcpy(dev->incomplete_write_buffer + dev->incomplete_write_buffer_size, temp_write_data, count);
-                new_entry.buffptr = dev->incomplete_write_buffer;
-                new_entry.size = dev->incomplete_write_buffer_size + count;
-            // }
-            // else {
-            //     PDEBUG("temp_write_data is NULL");
-            //     mutex_unlock(&dev->lock);
-            //     return -ENOMEM;
-            // }
-        }
-
-        PDEBUG("Adding entry to circular buffer");
-        lost_entry = aesd_circular_buffer_add_entry(&dev->circ_buffer, &new_entry);
-
-        if (lost_entry) {
-            PDEBUG("Freeing one entry from circular buffer because it was overwritten.");
-            kfree(lost_entry); // FIXME: Will this work??
-            lost_entry = NULL;
-        }
-        // clear out incomplete_write_buffer and incomplete_write_size
-        dev->incomplete_write_buffer = NULL;
-        dev->incomplete_write_buffer_size = 0;
-
-        retval = count;
-    }
-    else { // append to incomplete_write_buffer because a \n was not yet found.
-        PDEBUG("Appending to incomplete_write_buffer, but not writing to circular buffer.");
-        dev->incomplete_write_buffer = krealloc(dev->incomplete_write_buffer, dev->incomplete_write_buffer_size + count, GFP_KERNEL);
-
-        if (!dev->incomplete_write_buffer) {
-            PDEBUG("Realloc didn't work for %s", dev->incomplete_write_buffer);
-            kfree(dev->incomplete_write_buffer);
-            mutex_unlock(&dev->lock);
-            return -ENOMEM;
-        }
-
-        // copy temp_write_data to the end of the incomplete_write_buffer
-        memcpy(dev->incomplete_write_buffer + dev->incomplete_write_buffer_size, temp_write_data, count);
-        dev->incomplete_write_buffer_size += count;
-
-        retval = count; // NEEDS to return count even if not writing to circular buffer
-    }
-
-    mutex_unlock(&dev->lock);
-    *f_pos += retval;
+    *f_pos += count;
+    retval = count;
+        
+out:
+    PDEBUG("aesd_read retval %zd bytes with offset %lld\n", retval, *f_pos);
+    mutex_unlock(&aesd_device->lock);
     return retval;
 }
+
+
+
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
+{
+    struct aesd_dev *aesd_device = filp->private_data;
+    const char *tmp_buffptr = NULL;
+    ssize_t retval = -ENOMEM;
+
+    PDEBUG("aesd_write %zu bytes with offset %lld (filp->f_po %lld)\n", count, *f_pos, filp->f_pos);
+
+    /**
+     * TODO: handle write
+     */
+    if (mutex_lock_interruptible(&aesd_device->lock))
+        return -ERESTARTSYS;
+    
+    /* Either our buffer_entry is NULL because brand new or the previous data has been pushed to the circular storage, and a new allocation is required.
+     * Either that entry isn't NULL because some data has already been stored but not pushed due to a lack of /n termination. In that case we 
+     * reallocate more memory to concatenate this new data coming from userland */
+    if (NULL == aesd_device->buffer_entry.buffptr) {
+	aesd_device->buffer_entry.size = 0;
+        aesd_device->buffer_entry.buffptr = kzalloc(count + 1, GFP_KERNEL); // Need an extra byte for \0 terminating the string
+        if (!aesd_device->buffer_entry.buffptr) {
+            retval = -ENOMEM;
+            goto end;
+        }
+    }
+    else {
+        tmp_buffptr = krealloc(aesd_device->buffer_entry.buffptr, aesd_device->buffer_entry.size + count, GFP_KERNEL);
+	aesd_device->buffer_entry.buffptr = tmp_buffptr;
+	if (!aesd_device->buffer_entry.buffptr) {
+            retval = -ENOMEM;
+            goto end;
+        }
+    }
+
+    // retrieve userland data and concatenate that into buffer_entry
+    if (copy_from_user((void *)(aesd_device->buffer_entry.buffptr + aesd_device->buffer_entry.size), buf, count)) {
+                retval = -EFAULT;
+                goto fault;
+    }
+
+    aesd_device->buffer_entry.size += count;
+
+    // only if the buffer_entry terminates with /n the data is pushed and the buffer_entry reset to NULL
+    if ('\n' == aesd_device->buffer_entry.buffptr[aesd_device->buffer_entry.size - 1]) {
+	tmp_buffptr = aesd_circular_buffer_add_entry(&aesd_device->buffer_storage, &aesd_device->buffer_entry);
+        if (NULL != tmp_buffptr) {
+            kfree(tmp_buffptr);
+        }
+
+	aesd_device->buffer_entry.buffptr = NULL;
+	aesd_device->buffer_entry.size = 0;
+    }
+
+    *f_pos += count;
+    retval = count;
+
+    goto end;
+   
+fault:
+    if (NULL != aesd_device->buffer_entry.buffptr) {
+    	kfree(aesd_device->buffer_entry.buffptr);
+	aesd_device->buffer_entry.buffptr = NULL;
+    }
+end:
+    mutex_unlock(&aesd_device->lock);
+    PDEBUG("aesd_write retval %zu with offset %lld",retval,*f_pos);
+    return retval;
+}
+
+
+
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    struct aesd_dev *aesd_device = filp->private_data;
+    struct aesd_seekto seek_ioctl = {0, 0};
+
+    PDEBUG("aesd_ioctl ");
+
+    // extract the type and number bitfields, and don't decode wrong cmds: return ENOTTY (inappropriate ioctl) before access_ok()
+    if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC) return -ENOTTY;
+    if (_IOC_NR(cmd) > AESDCHAR_IOC_MAXNR) return -ENOTTY;
+/*
+    // the direction is a bitmask, and VERIFY_WRITE catches R/W transfers. `Type' is user-oriented, while access_ok is kernel-oriented, so the concept of "read" and "write" is reversed
+    if (_IOC_DIR(cmd) & _IOC_READ)
+        err = !access_ok_wrapper(VERIFY_WRITE, (aesd_seekto *)arg, _IOC_SIZE(cmd));
+    else if (_IOC_DIR(cmd) & _IOC_WRITE)
+        err =  !access_ok_wrapper(VERIFY_READ, (aesd_seekto *)arg, _IOC_SIZE(cmd));
+    if (err) return -EFAULT;
+*/    
+    switch(cmd) {
+        case AESDCHAR_IOCSEEKTO:
+            if (copy_from_user(&seek_ioctl, (struct aesd_seekto *)arg, sizeof(struct aesd_seekto))) return -EFAULT;
+		
+	    PDEBUG("extracted cmd: %i, offset: %i ", seek_ioctl.write_cmd, seek_ioctl.write_cmd_offset);
+
+            while( (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED > seek_ioctl.write_cmd)  && (seek_ioctl.write_cmd > 0) ) {
+		    
+		PDEBUG("seek_ioctl.write_cmd: %d\n", --seek_ioctl.write_cmd);
+		filp->f_pos += aesd_device->buffer_storage.entry[seek_ioctl.write_cmd].size;
+	    }
+
+	    filp->f_pos += seek_ioctl.write_cmd_offset;
+
+            PDEBUG("->f_pos: %lld\n", filp->f_pos);
+	    break;
+
+	default:  // redundant, as cmd was checked against MAXNR
+            return -ENOTTY;
+    }
+
+    return 0;
+}
+
+
+
+loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
+{
+    struct aesd_dev *aesd_device = filp->private_data;
+    loff_t newpos;
+
+    PDEBUG("aesd_llseek with offset %lld (filp->f_po %lld)\n", off, filp->f_pos);
+
+    switch(whence) {
+        case 0: // SEEK_SET
+            newpos = off;
+	    PDEBUG("aesd_llseek SEEK_SET %lld\n", off);
+            break;
+
+        case 1: // SEEK_CUR
+            newpos = filp->f_pos + off;
+	    PDEBUG("aesd_llseek SEEK_CUR %lld\n", off);
+            break;
+
+        case 2: // SEEK_END
+            newpos = off + aesd_circular_buffer_size(&aesd_device->buffer_storage);
+	    PDEBUG("aesd_llseek buffer size %zu", aesd_circular_buffer_size(&aesd_device->buffer_storage));
+	    PDEBUG("aesd_llseek SEEK_END %lld\n", off);
+            break;
+
+        default: // can't happen
+            return -EINVAL;
+    }
+    
+    if (newpos < 0)
+        return -EINVAL;
+        
+    filp->f_pos = newpos;
+    PDEBUG("aesd_llseek new position %lld", newpos);
+    return newpos;
+}
+
+
+
 struct file_operations aesd_fops = {
-    .owner =    THIS_MODULE,
-    .read =     aesd_read,
-    .write =    aesd_write,
-    .open =     aesd_open,
-    .release =  aesd_release,
+    .owner          = THIS_MODULE,
+    .llseek         = aesd_llseek,
+    .read           = aesd_read,
+    .write          = aesd_write,
+    .unlocked_ioctl = aesd_ioctl,
+    .open           = aesd_open,
+    .release        = aesd_release,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
 {
     int err, devno = MKDEV(aesd_major, aesd_minor);
-
+    
     cdev_init(&dev->cdev, &aesd_fops);
     dev->cdev.owner = THIS_MODULE;
     dev->cdev.ops = &aesd_fops;
     err = cdev_add (&dev->cdev, devno, 1);
     if (err) {
-        printk(KERN_ERR "Error %d adding aesd cdev", err);
+        printk(KERN_ERR "Error %d adding aesd cdev\n", err);
     }
     return err;
 }
 
 
+struct aesd_dev *aesd_device; /* need to be global between init and cleanup for proper memory free */
 
 int aesd_init_module(void)
 {
     dev_t dev = 0;
     int result;
-    result = alloc_chrdev_region(&dev, aesd_minor, 1, "aesdchar"); // calls register_chrdev_region()
+
+    result = alloc_chrdev_region(&dev, aesd_minor, 1, DEVICE_NAME);
     aesd_major = MAJOR(dev);
     if (result < 0) {
         printk(KERN_WARNING "Can't get major %d\n", aesd_major);
-        return result;
+        goto end;
     }
-    memset(&aesd_device,0,sizeof(struct aesd_dev));
 
-    // DONE: initialize the AESD specific portion of the device
-    // Initializing the locking primitive here for example
-    aesd_circular_buffer_init(&aesd_device.circ_buffer);
-    mutex_init(&aesd_device.lock);
-    aesd_device.incomplete_write_buffer = NULL;
-    aesd_device.incomplete_write_buffer_size = 0;
-    result = aesd_setup_cdev(&aesd_device);
-
-    if (result) {
-        unregister_chrdev_region(dev, 1);
+    /**
+     * TODO: initialize the AESD specific portion of the device
+     */
+    aesd_device = kzalloc(sizeof(struct aesd_dev), GFP_KERNEL);
+    if (!aesd_device) {
+        result = -ENOMEM;
+	goto nomem;
     }
+
+    result = aesd_setup_cdev(aesd_device);
+    if( result ) {
+        goto nodev;
+    }
+
+    goto end;
+
+nodev:
+    kfree(aesd_device);
+    aesd_device = NULL;
+nomem:
+    unregister_chrdev_region(dev, 1);
+end:
     return result;
-
 }
+
 
 void aesd_cleanup_module(void)
 {
-    struct aesd_buffer_entry *entry;
-    int i = 0;
+    struct aesd_buffer_entry *tmp_entry = NULL;
+    uint8_t index = 0;
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
-    cdev_del(&aesd_device.cdev);
+    /**
+     * TODO: cleanup AESD specific poritions here as necessary
+     */
+    if (aesd_device) {
+	AESD_CIRCULAR_BUFFER_FOREACH(tmp_entry, &aesd_device->buffer_storage, index) {
+            if (NULL != tmp_entry->buffptr) {
+                kfree(tmp_entry->buffptr);
+            }
+        }
 
-    // DONE: cleanup AESD specific portions here as necessary
-    // Balance what I initialized in the aesd_init_module. ie Free memory, stop using locking primitiives.
-    // Remove all members of buffer
-    AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circ_buffer, i) {
-        kfree(entry->buffptr);
+        if (NULL != aesd_device->buffer_entry.buffptr) {
+            kfree(aesd_device->buffer_entry.buffptr);
+        }
+
+        cdev_del(&aesd_device->cdev);
+	kfree(aesd_device);
     }
 
-    mutex_destroy(&aesd_device.lock);
     unregister_chrdev_region(devno, 1);
-    PDEBUG("Clean up the aesd module");
 }
-
 
 
 module_init(aesd_init_module);
