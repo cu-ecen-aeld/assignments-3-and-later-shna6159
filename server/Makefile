@@ -1,27 +1,31 @@
-INCLUDE_DIRS =
-LIB_DIRS =
-CC? = gcc
+# target ... : prerequisites ...
+#		recipe
+#		...
+BUILD_DIR = .
+CFLAGS ?= -g -Wall -Werror
+# $(CROSS_COMPILE) can be "aarch64-none-linux-gnu-" when cross-compiling
+# Only for testing the cross compilation:
+# CROSS_COMPILE = aarch64-none-linux-gnu-
 
-CDEFS =
-CFLAGS? = -O0 -Wall -Werror -g $(INCLUDE_DIRS) $(CDEFS)
-LDFLAGS? = -lpthread
-LIBS =
+# FIXME: Will "=" break when this is tested automatically?
+# Must be "=" and not "?=" if I want to test this manually AND HAVE DEBUG INFO COMPILED
+CC ?= $(CROSS_COMPILE)gcc $(CFLAGS)
 
-HFILES =
-CFILES = aesdsocket.c
+TARGET ?= aesdsocket
+LDFLAGS ?= -lpthread -lrt
+# TODO: Any INCLUDES are necessary?
 
-SRCS = ${HFILES} ${CFILES}
-OBJS = ${CFILES:.c=.o}
+# Build for both the aesdsocket.o and aesdsocket dependencies
+all: aesdsocket.o $(TARGET)
 
-all: aesdsocket
-default: aesdsocket
+aesdsocket.o : aesdsocket.c
+	@echo "Cross compile is $(CROSS_COMPILE)"...
+	$(CC) -c -o aesdsocket.o aesdsocket.c
 
-clean:
-	-rm -f *.o *.d
-	-rm -f aesdsocket
+aesdsocket : aesdsocket.o
+	$(CC) aesdsocket.o -o $(TARGET) $(LDFLAGS)
+	@echo "------- Successfully built --------"
 
-aesdsocket: aesdsocket.o
-	$(CROSS_COMPILE)$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $@.o $(LDFLAGS)
-
-.c.o:
-	$(CROSS_COMPILE)$(CC) $(CFLAGS) -c $<
+clean :
+	@echo "The main directory is $(BUILD_DIR)"
+	rm -rf $(BUILD_DIR)/aesdsocket.o aesdsocket

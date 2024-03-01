@@ -5,11 +5,12 @@
  *      Author: Dan Walkes
  */
 
-#include <linux/mutex.h>
-#include "aesd-circular-buffer.h"
-
 #ifndef AESD_CHAR_DRIVER_AESDCHAR_H_
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
+
+#include <linux/cdev.h> // cdev_init(), cdev_add(), cdev_del()
+#include "aesd-circular-buffer.h"
+// #include <stdio.h> // for stderr. Will this cause issues to include this??
 
 #define AESD_DEBUG 1  //Remove comment on this line to enable debug
 
@@ -28,12 +29,12 @@
 
 struct aesd_dev
 {
-    char* string;
-    size_t string_size;
-    size_t string_capacity;
-    struct mutex buffer_mutex;
-    struct aesd_circular_buffer buffer;
+    // TODO: Add structure(s) and locks needed to complete assignment requirements
     struct cdev cdev;     /* Char device structure      */
+    struct mutex lock;
+    struct aesd_circular_buffer circ_buffer;
+    char *incomplete_write_buffer;
+    size_t incomplete_write_buffer_size;
 };
 
 
